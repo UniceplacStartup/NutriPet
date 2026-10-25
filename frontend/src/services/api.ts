@@ -62,6 +62,19 @@ async function request<T>(
 }
 
 // ========== AUTH ==========
+export interface CadastroData {
+  matricula: string // 7 dígitos (0000000)
+  nome: string
+  email: string
+  password: string
+  clinica: {
+    cnpj: string
+    razaoSocial: string
+    email: string
+    telefone: string
+  }
+}
+
 export const authAPI = {
   async login(email: string, password: string) {
     return request<{ token: string; user: any }>('/auth/login', {
@@ -70,16 +83,25 @@ export const authAPI = {
     })
   },
 
+  // Cadastro público: cria a clínica e o admin (exige matrícula da faculdade)
+  async cadastro(data: CadastroData) {
+    return request<{ token: string; user: any; clinica: any }>('/auth/cadastro', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Admin cadastra um usuário na própria clínica
   async register(data: {
-    clinic_id: number
     nome: string
     email: string
     password: string
     role: string
   }) {
-    return request<{ token: string; user: any }>('/auth/register', {
+    return request<{ user: any }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
+      requiresAuth: true,
     })
   },
 }
@@ -106,13 +128,6 @@ export const clinicasAPI = {
     return request<any>(`/clinicas/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-      requiresAuth: true,
-    })
-  },
-
-  async delete(id: number) {
-    return request<void>(`/clinicas/${id}`, {
-      method: 'DELETE',
       requiresAuth: true,
     })
   },

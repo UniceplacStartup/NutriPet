@@ -1,47 +1,99 @@
 const Clinic = require('../models/Clinic');
 const db = require('../config/database');
 
-const { isUndefined, invalidCnpj, invalidEmail } = require('../utils/validateInput');
+const { respondWithError } = require('../utils/dbErrors');
+const { invalidText, invalidCnpj, normalizeCnpj, invalidEmail, normalizeEmail, invalidOptionalText, toOptionalText } = require('../utils/validateInput');
 
 const createClinic = async (req, res) => {
     try {
-        const { cnpj, razaoSocial, email, telefone } = req.body;
-
-        if (invalidCnpj(cnpj) || isUndefined(razaoSocial) || invalidEmail(email) || isUndefined(telefone)) {
-            res.status(400).json({ error: 'Dados inválidos' });
+        const erro = Clinic.Clinic.validate(req.body);
+        if (erro) {
+            res.status(400).json({ error: erro });
             return
         }
 
-        const clinic = new Clinic.Clinic(cnpj.trim(), razaoSocial.trim(), email.trim(), telefone.trim());
+        const clinic = Clinic.Clinic.fromBody(req.body);
 
         await clinic.save();
 
-        res.status(201).json({ 
+        res.status(201).json({
             message: 'Clínica criada com sucesso',
-            clinica: {
-                id: clinic.id,
-                cnpj: clinic.cnpj,
-                razaoSocial: clinic.razaoSocial,
-                email: clinic.email,
-                telefone: clinic.telefone
-            }
+            clinica: clinic
         });
     } catch (err) {
-        console.error('Erro ao criar clínica:', err);
-        res.status(500).json({ error: 'Erro ao criar clínica', details: err.message });
+        respondWithError(res, err, 'Erro ao criar clínica');
+    }
+};
+
+// Usuários só enxergam a própria clínica
+const getClinicById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (Number(id) !== Number(req.user.clinicaId)) {
+            return res.status(404).json({ error: 'Clínica não encontrada' });
+        }
+        const { rows } = await db.query('SELECT * FROM clinicas WHERE id = $1', [id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Clínica não encontrada' });
+        }
+        res.status(200).json(rows[0]);
+    } catch (err) {
+        respondWithError(res, err, 'Erro ao buscar clínica');
+    }
+};
+
+const updateClinic = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (Number(id) !== Number(req.user.clinicaId)) {
+            return res.status(404).json({ error: 'Clínica não encontrada' });
+        }
+
+        // Aceita razaoSocial (padrão do cadastro) ou razao_social (padrão do GET)
+        const { cnpj, email, telefone } = req.body ?? {};
+        const razaoSocial = req.body?.razaoSocial ?? req.body?.razao_social;
+
+        if ((cnpj !== undefined && invalidCnpj(cnpj)) || (razaoSocial !== undefined && invalidText(razaoSocial))
+            || (email !== undefined && invalidEmail(email)) || invalidOptionalText(telefone)) {
+            return res.status(400).json({ error: 'Dados inválidos' });
+        }
+
+        const { rows } = await db.query(
+            `UPDATE clinicas SET
+                cnpj = COALESCE($1, cnpj),
+                razao_social = COALESCE($2, razao_social),
+                email = COALESCE($3, email),
+                telefone = COALESCE($4, telefone),
+                updated_at = NOW()
+             WHERE id = $5 RETURNING *`,
+            [
+                cnpj !== undefined ? normalizeCnpj(cnpj.trim()) : null,
+                razaoSocial?.trim() ?? null,
+                email !== undefined ? normalizeEmail(email) : null,
+                toOptionalText(telefone),
+                id
+            ]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Clínica não encontrada' });
+        }
+        res.status(200).json(rows[0]);
+    } catch (err) {
+        respondWithError(res, err, 'Erro ao atualizar clínica');
     }
 };
 
 module.exports = {
     createClinic,
-    // Lista todas as clínicas (suporte ao frontend)
+    getClinicById,
+    updateClinic,
+    // Lista a clínica do usuário (suporte ao frontend); antes listava as de todos
     async listClinics(req, res) {
         try {
-            const { rows } = await db.query('SELECT * FROM clinicas ORDER BY id ASC');
+            const { rows } = await db.query('SELECT * FROM clinicas WHERE id = $1 ORDER BY id ASC', [req.user.clinicaId]);
             res.status(200).json(rows);
         } catch (err) {
-            console.error('Erro ao listar clínicas:', err);
-            res.status(500).json({ error: 'Erro ao listar clínicas', details: err.message });
+            respondWithError(res, err, 'Erro ao listar clínicas');
         }
     },
 };

@@ -143,26 +143,32 @@ Rode esse comando **a cada deploy** que trouxer migrations novas (pasta `backend
 
 **2. Primeiro acesso: criar a clínica e o administrador**
 
-Não existe cadastro público: criar usuários e clínicas exige um admin logado. O primeiro admin precisa ser criado direto no banco. Gere o hash da senha (mínimo de 8 caracteres, com maiúscula, minúscula e número, ou o login será recusado):
+Quem tem matrícula da faculdade (7 dígitos, máscara `0000000`) cria a própria conta de admin pela tela **Criar uma conta** (`/cadastro`), que cria a clínica e o administrador juntos. Pela API:
 
-```bash
-cd backend
-node -e "require('bcrypt').hash(process.argv[1], 10).then(console.log)" 'SuaSenhaForte123'
+```http
+POST /api/auth/cadastro
+Content-Type: application/json
+
+{
+  "matricula": "0012345",
+  "nome": "Nome do Admin",
+  "email": "admin@clinica.com.br",
+  "password": "SuaSenhaForte123",
+  "clinica": {
+    "cnpj": "12.345.678/0001-90",
+    "razaoSocial": "Nome da Clínica LTDA",
+    "email": "contato@clinica.com.br",
+    "telefone": "61999999999"
+  }
+}
 ```
 
-E execute no banco, substituindo os dados e o `<HASH>`:
+- A resposta (`201`) traz `token`, `user` e `clinica`, e o admin já fica logado.
+- Cada matrícula cria **uma** conta (repetida retorna `409`). A API confere só o formato: não há consulta à base de alunos da faculdade.
+- O e-mail de login é único no sistema todo, sem diferenciar maiúsculas. O CNPJ pode vir com ou sem máscara e é gravado só com os dígitos.
+- Limite de 10 cadastros por hora por IP.
 
-```sql
-WITH c AS (
-  INSERT INTO clinicas (razao_social, cnpj, email, telefone)
-  VALUES ('Nome da Clínica LTDA', '12345678000190', 'contato@clinica.com.br', '61999999999')
-  RETURNING id
-)
-INSERT INTO usuarios (clinica_id, nome, email, password_hash, role)
-SELECT id, 'Nome do Admin', 'admin@clinica.com.br', '<HASH>', 'admin' FROM c;
-```
-
-Depois disso, o admin cadastra os demais usuários da clínica pelo endpoint `POST /api/auth/register`. **Não rode o `seed.js` em produção**: ele cria um admin com senha pública.
+Depois disso, o admin cadastra os demais usuários da clínica pelo endpoint `POST /api/auth/register` (com o token do admin; o usuário entra na clínica do admin). **Não rode o `seed.js` em produção**: ele cria um admin com senha pública.
 
 **3. Backend (API)**
 

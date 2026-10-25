@@ -1,11 +1,14 @@
 const { Router } = require('express');
 const controller = require('../controllers/formCalculationController');
 const { authenticateToken } = require('../middlewares/auth');
+const { validateIdParam } = require('../middlewares/validateIdParam');
 const { checkRole } = require('../middlewares/checkRole');
 
 const router = Router();
 
-router.use(authenticateToken);
+// Só no prefixo do recurso: aplicado a todo /api, barraria as rotas de outros routers
+router.use('/calculos', authenticateToken);
+router.param('id', validateIdParam);
 
 router.post('/calculos', checkRole('admin', 'veterinario'), controller.upsertFormCalculation); // upsert por formulario_id
 router.get('/calculos/compute', checkRole('admin', 'veterinario', 'atendente'), controller.computeOnly); // calcula sem salvar

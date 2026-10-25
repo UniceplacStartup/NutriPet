@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { respondWithError } = require('../utils/dbErrors');
 
 const validatePatientAccess = async (req, res, next) => {
     try {
@@ -26,7 +27,7 @@ const validatePatientAccess = async (req, res, next) => {
         req.paciente = paciente;
         next();
     } catch (err) {
-        return res.status(500).json({ error: 'Erro ao validar acesso.', details: err.message });
+        return respondWithError(res, err, 'Erro ao validar acesso.');
     }
 };
 
@@ -64,7 +65,7 @@ const validateFormAccess = async (req, res, next) => {
         req.formulario = formulario;
         next();
     } catch (err) {
-        return res.status(500).json({ error: 'Erro ao validar acesso.', details: err.message });
+        return respondWithError(res, err, 'Erro ao validar acesso.');
     }
 };
 

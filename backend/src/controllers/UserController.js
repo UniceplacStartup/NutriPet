@@ -1,75 +1,143 @@
 const User = require('../models/User');
+const Clinic = require('../models/Clinic');
 const db = require('../config/database');
 
 const { createToken } = require('../utils/jwt');
 const { encryptPassword, comparePassword } = require('../utils/bcrypt');
-const { isUndefined, invalidPassword, invalidEmail } = require('../utils/validateInput');
+const { respondWithError } = require('../utils/dbErrors');
+const { invalidText, invalidPassword, invalidEmail, normalizeEmail, invalidMatricula } = require('../utils/validateInput');
 
+const rolesPermitidas = [
+    'admin',
+    'veterinario',
+    'atendente'
+];
+
+const invalidRole = (role) => typeof role !== 'string' || !rolesPermitidas.includes(role.trim());
+
+// Mensagem única para os dados do usuário (nome, e-mail e senha)
+const userDataError = ({ nome, email, password }) => {
+    if (invalidText(nome)) { return 'Nome é obrigatório' }
+    if (invalidEmail(email)) { return 'E-mail inválido' }
+    if (invalidPassword(password)) {
+        return 'Senha inválida: mínimo de 8 caracteres, com maiúscula, minúscula e número, sem espaços nas pontas';
+    }
+    return null;
+};
+
+// Cadastro público: cria a clínica e o primeiro admin, mediante matrícula da faculdade
+const signup = async (req, res) => {
+    const { matricula, nome, email, password, clinica } = req.body ?? {};
+
+    if (invalidMatricula(matricula)) {
+        return res.status(400).json({ error: 'Matrícula inválida: informe 7 dígitos (0000000)' });
+    }
+    const erroUsuario = userDataError({ nome, email, password });
+    if (erroUsuario) {
+        return res.status(400).json({ error: erroUsuario });
+    }
+    const erroClinica = Clinic.Clinic.validate(clinica);
+    if (erroClinica) {
+        return res.status(400).json({ error: erroClinica });
+    }
+
+    const emailNormalizado = normalizeEmail(email);
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        if (await User.User.emailInUse(emailNormalizado, null, client)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'E-mail já cadastrado' });
+        }
+
+        const clinic = Clinic.Clinic.fromBody(clinica);
+        await clinic.save(client);
+
+        const user = new User.User(clinic.id, nome.trim(), emailNormalizado, 'admin', await encryptPassword(password));
+        user.matricula = matricula.trim();
+        await user.save(client);
+
+        await client.query('COMMIT');
+
+        res.status(201).json({ token: createToken(user), user, clinica: clinic });
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        respondWithError(res, err, 'Erro ao criar conta');
+    } finally {
+        client.release();
+    }
+};
+
+// Admin cadastra um usuário na própria clínica
 const register = async (req, res) => {
     try {
-        const { nome, email, password, role } = req.body;
+        const { nome, email, password, role } = req.body ?? {};
 
         const clinic_id = req.user.clinicaId;
 
-        const rolesPermitidas = [
-            'admin',
-            'veterinario',
-            'atendente'
-        ];
-
-        if (!role || !rolesPermitidas.includes(role.trim())){
+        if (invalidRole(role)) {
             return res.status(400).json({
                 error: 'Role inválida'
             });
         }
 
-        if (isUndefined(clinic_id) || isUndefined(nome) || invalidEmail(email) || isUndefined(role) || invalidPassword(password)) {
-            res.status(400).json({ error: 'Dados inválidos' });
-            return
+        const erroUsuario = userDataError({ nome, email, password });
+        if (erroUsuario) {
+            return res.status(400).json({ error: erroUsuario });
+        }
+
+        const emailNormalizado = normalizeEmail(email);
+        if (await User.User.emailInUse(emailNormalizado)) {
+            return res.status(409).json({ error: 'E-mail já cadastrado' });
         }
 
         const user = new User.User(
-            Number(clinic_id), 
-            nome.trim(), 
-            email.trim(), 
-            role.trim(), 
-            await encryptPassword(password.trim())
+            Number(clinic_id),
+            nome.trim(),
+            emailNormalizado,
+            role.trim(),
+            await encryptPassword(password)
         );
 
         await user.save();
 
-        const token = createToken(user);
-
-        res.status(201).json({ token: token });
+        // Não devolve token: quem cadastra é o admin, que continua com a própria sessão
+        res.status(201).json({ user });
     } catch (err) {
-        console.error('Erro ao registrar usuário:', err);
-        res.status(500).json({ error: 'Erro ao registrar usuário', details: err.message });
+        respondWithError(res, err, 'Erro ao registrar usuário');
     }
 };
 
 const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password } = req.body ?? {};
 
         if (invalidEmail(email) || invalidPassword(password)) {
             res.status(400).json({ error: 'Email ou senha inválidos' });
             return
         }
 
-        const user = new User.User();
-        const found = await user.findByEmail(email);
+        // Bases antigas podem ter o mesmo e-mail em mais de uma conta: vale a que tiver a senha
+        const candidatos = await User.User.findAllByEmail(email.trim());
+        let user = null;
+        for (const candidato of candidatos) {
+            if (await comparePassword(password, candidato.password)) {
+                user = candidato;
+                break;
+            }
+        }
 
-        if (!found || !await comparePassword(password, user.password)) {
+        if (!user) {
             res.status(401).json({ error: 'Credenciais inválidas' });
             return
         }
 
         const token = createToken(user);
 
-        res.status(200).json({ token: token });
+        res.status(200).json({ token: token, user });
     } catch (err) {
-        console.error('Erro ao fazer login:', err);
-        res.status(500).json({ error: 'Erro ao fazer login', details: err.message });
+        respondWithError(res, err, 'Erro ao fazer login');
     }
 };
 
@@ -79,14 +147,11 @@ const listUsers = async (req, res) => {
 
         const { rows } = await db.query(
             'SELECT id, clinica_id, nome, email, role, created_at, updated_at FROM usuarios WHERE clinica_id = $1 ORDER BY id DESC', [clinica_id]
-        ); 
+        );
 
         res.status(200).json(rows);
     } catch (err) {
-        res.status(500).json({
-            error: 'Erro ao listar usuários',
-            details: err.message
-        });
+        respondWithError(res, err, 'Erro ao listar usuários');
     }
 };
 
@@ -96,9 +161,9 @@ const getUserById = async(req, res) => {
         const clinica_id = req.user.clinicaId;
 
         const {rows} = await db.query(
-            `SELECT id, clinica_id, nome, email, role, created_at, updated_at 
-             FROM usuarios 
-             WHERE id = $1 
+            `SELECT id, clinica_id, nome, email, role, created_at, updated_at
+             FROM usuarios
+             WHERE id = $1
              AND clinica_id = $2`,
              [id, clinica_id]
         );
@@ -109,10 +174,7 @@ const getUserById = async(req, res) => {
 
         res.status(200).json(rows[0]);
     } catch (err) {
-        res.status(500).json({
-            error: 'Erro ao buscar usuário',
-            details: err.message
-        });
+        respondWithError(res, err, 'Erro ao buscar usuário');
     }
 };
 
@@ -123,29 +185,28 @@ const updateUser = async (req, res) => {
         const {id} = req.params;
         const clinica_id = req.user.clinicaId;
 
-        const {nome, email, role, password} = req.body;
+        const {nome, email, role, password} = req.body ?? {};
 
-        const rolesPermitidas = [
-            'admin',
-            'veterinario',
-            'atendente'
-        ];
-
-        if (role && !rolesPermitidas.includes(role.trim())) {
+        if (role !== undefined && invalidRole(role)) {
             return res.status(400).json({
                 error: 'Role inválida'
             });
         }
 
         // Mesma política do cadastro: senha fora dela seria recusada no login
-        if ((!isUndefined(email) && invalidEmail(email)) || (!isUndefined(password) && invalidPassword(password))) {
+        if ((nome !== undefined && invalidText(nome)) || (email !== undefined && invalidEmail(email)) || (password !== undefined && invalidPassword(password))) {
             return res.status(400).json({ error: 'Dados inválidos' });
+        }
+
+        const emailNormalizado = email !== undefined ? normalizeEmail(email) : null;
+        if (emailNormalizado && await User.User.emailInUse(emailNormalizado, id)) {
+            return res.status(409).json({ error: 'E-mail já cadastrado' });
         }
 
         let passwordHash = null;
 
-        if (password) {
-            passwordHash = await encryptPassword(password.trim()); 
+        if (password !== undefined) {
+            passwordHash = await encryptPassword(password);
         }
 
         const {rows} = await db.query(
@@ -160,9 +221,9 @@ const updateUser = async (req, res) => {
              RETURNING id, clinica_id, nome, email, role, created_at, updated_at`,
              [
                 nome?.trim() ?? null,
-                email?.trim() ?? null,
+                emailNormalizado,
                 role?.trim() ?? null,
-                passwordHash, 
+                passwordHash,
                 id,
                 clinica_id
              ]
@@ -174,10 +235,7 @@ const updateUser = async (req, res) => {
 
         res.status(200).json(rows[0]);
     } catch (err) {
-        res.status(500).json({
-            error: 'Erro ao atualizar usuário',
-            details: err.message
-        });
+        respondWithError(res, err, 'Erro ao atualizar usuário');
     }
 };
 
@@ -204,14 +262,12 @@ const deleteUser = async (req, res) =>{
 
         res.status(204).json();
     } catch (err) {
-        res.status(500).json({
-            error: 'Erro ao deletar usuário',
-            details: err.message
-        });
+        respondWithError(res, err, 'Erro ao deletar usuário');
     }
 };
 
 module.exports = {
+    signup,
     register,
     login,
     listUsers,

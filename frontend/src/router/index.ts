@@ -12,6 +12,11 @@ const router = createRouter({
       component: MedVetLogin,
     },
     {
+      path: '/cadastro',
+      name: 'cadastro',
+      component: () => import('@/views/CadastroView.vue'),
+    },
+    {
       path: '/dashboard',
       name: 'dashboard',
       component: DashboardView,
@@ -44,7 +49,7 @@ router.beforeEach((to, _from, next) => {
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next('/')
-  } else if (to.name === 'login' && authStore.isAuthenticated) {
+  } else if ((to.name === 'login' || to.name === 'cadastro') && authStore.isAuthenticated) {
     next('/dashboard')
   } else {
     next()

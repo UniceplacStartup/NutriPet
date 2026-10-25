@@ -1,4 +1,11 @@
+const { mapDbError } = require('../utils/dbErrors');
+
 const errorHandler = (err, req, res, next) => {
+  // Corpo da requisição com JSON malformado (express.json)
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'JSON inválido no corpo da requisição' });
+  }
+
   // Erro de validacao
   if (err.name === 'SequelizeValidationError') {
     const messages = err.errors.map(e => e.message);
@@ -9,6 +16,12 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'SequelizeUniqueConstraintError') {
     const messages = err.errors.map(e => e.message);
     return res.status(409).json({ error: 'Conflito de dados', messages });
+  }
+
+  // Erros conhecidos do PostgreSQL (unique, FK, tipo inválido...)
+  const dbError = mapDbError(err);
+  if (dbError) {
+    return res.status(dbError.status).json({ error: dbError.error });
   }
 
   // Token invalido
