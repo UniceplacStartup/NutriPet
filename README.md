@@ -31,46 +31,47 @@ As tecnologias escolhidas para este projeto visam produtividade, escalabilidade 
 
 ## 🚀 Como Rodar o Projeto (Ambiente de Desenvolvimento)
 
-Siga os passos abaixo para configurar e executar o projeto em sua máquina local.
-
 ### Pré-requisitos
 
-- **Node.js** (versão 18 ou superior)
-- **NPM** ou **Yarn**
+- **Node.js** 20.19+ ou 22.12+ (exigido pelo Vite do frontend)
 - **Git**
-- Uma instância do **PostgreSQL** rodando
+- Uma instância do **PostgreSQL** rodando, com um banco criado (ex: `univet_db`)
 
 ### Passos para Instalação
 
 1.  **Clone o repositório:**
     ```bash
-    git clone [https://github.com/UniceplacStartup/Formul-rio_MEDVet.git](https://github.com/UniceplacStartup/Formul-rio_MEDVet.git)
-    cd Formul-rio_MEDVet
+    git clone https://github.com/UniceplacStartup/NutriPet.git
+    cd NutriPet
     ```
 
-2.  **Configure as Variáveis de Ambiente do Backend:**
-    - Navegue até a pasta `backend`.
-    - Crie uma cópia do arquivo `.env.example` (se houver) ou crie um novo arquivo chamado `.env`.
-    - Preencha o arquivo `.env` com as suas credenciais do banco de dados:
-      ```env
-      # Configuração do Servidor
-      PORT=3333
-
-      # Configuração do Banco de Dados
-      DATABASE_URL="postgresql://SEU_USUARIO:SUA_SENHA@localhost:5432/SEU_BANCO"
-      ```
-
-3.  **Instale as dependências do Backend:**
+2.  **Configure as variáveis de ambiente do backend:**
     ```bash
     cd backend
-    npm install
+    cp .env.example .env
     ```
+    Ajuste as credenciais do banco e defina `SECRETKEY` (sem ela o login retorna erro 500). Veja a [tabela de variáveis](#variáveis-de-ambiente-do-backend).
 
-4.  **Instale as dependências do Frontend:**
+3.  **Instale as dependências:**
     ```bash
+    npm install            # dentro de backend/
     cd ../frontend
     npm install
     ```
+
+4.  **Crie as tabelas (migrations):**
+    ```bash
+    cd ../backend
+    npx sequelize-cli db:migrate --url postgres://USUARIO:SENHA@localhost:5432/univet_db
+    ```
+    > ⚠️ O `npm run db:migrate` **não lê o `.env`**: ele usa os dados fixos de `config/config.json` (`postgres:postgres@localhost:5432/univet_db`). Use `--url` sempre que o seu banco for diferente disso.
+
+5.  **(Opcional) Popule dados de demonstração:**
+    ```bash
+    node seed.js
+    ```
+    Cria uma clínica, um tutor, um paciente e o usuário **admin@demo.com / Demo1234**. Use apenas em desenvolvimento.
+    > O arquivo `seed-demo.sql` está desatualizado em relação ao schema e falha; use o `seed.js`.
 
 ### Executando a Aplicação
 
@@ -81,7 +82,7 @@ Você precisará de dois terminais abertos para rodar o backend e o frontend sim
   cd backend
   npm run dev
   ```
-  O servidor do backend estará rodando em `http://localhost:3333`.
+  O servidor do backend estará rodando em `http://localhost:3000`.
 
 - **Terminal 2: Rodar o Frontend**
   ```bash
@@ -89,6 +90,128 @@ Você precisará de dois terminais abertos para rodar o backend e o frontend sim
   npm run dev
   ```
   A aplicação frontend estará acessível em `http://localhost:5173` (ou outra porta indicada no terminal).
+
+### Testes
+
+```bash
+cd backend && npm test        # Jest
+cd frontend && npm run test:unit
+```
+
+## 🌐 Deploy
+
+O sistema é composto por três partes independentes:
+
+| Parte | O que é | Onde pode rodar |
+| :--- | :--- | :--- |
+| **Banco** | PostgreSQL 13+ | Qualquer Postgres gerenciado (Neon, Supabase, RDS, Render…) ou próprio |
+| **API** | Processo Node.js (`backend/`) | Qualquer serviço que rode Node (Render, Railway, VPS com PM2…) |
+| **Frontend** | Arquivos estáticos gerados pelo build (`frontend/dist/`) | Qualquer hospedagem estática (Netlify, Vercel, Nginx, S3…) |
+
+### Variáveis de ambiente do backend
+
+| Variável | Obrigatória | Descrição |
+| :--- | :---: | :--- |
+| `DATABASE_URL` | ✅ * | String de conexão do Postgres. Se o provedor exigir SSL, acrescente `?sslmode=require` |
+| `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE` | ✅ * | Alternativa à `DATABASE_URL` (* use uma das duas formas) |
+| `DATABASE_SSL` | | `true` força SSL sem validar o certificado (para certificado autoassinado). Só funciona junto com `DATABASE_URL` e não afeta as migrations |
+| `SECRETKEY` | ✅ | Chave de assinatura dos tokens JWT. Use um valor longo e aleatório (ex: `openssl rand -hex 32`). Trocá-la invalida todas as sessões |
+| `CORS_ORIGIN` | ✅ em produção | URL(s) do frontend, separadas por vírgula **sem espaços** (ex: `https://app.exemplo.com.br`). Padrão: `http://localhost:5173` |
+| `PORT` | | Porta HTTP da API. Padrão: `3000` (a maioria das plataformas define automaticamente) |
+| `TRUST_PROXY` | ✅ atrás de proxy | Número de proxies reversos à frente da API (normalmente `1`). Sem isso, o rate limit trata todos os usuários como um só IP e o limite de login (5 tentativas a cada 15 min) passa a valer para o sistema inteiro |
+| `NODE_ENV` | | `production` oculta o stack trace nas respostas de erro |
+
+### Variáveis de ambiente do frontend
+
+| Variável | Descrição |
+| :--- | :--- |
+| `VITE_API_URL` | URL pública da API **incluindo `/api`** (ex: `https://api.exemplo.com.br/api`). É embutida no momento do **build**: alterar depois exige um novo build. Padrão: `http://localhost:3000/api` |
+
+### Passo a passo
+
+**1. Banco de dados: rodar as migrations**
+
+As migrations usam o `sequelize-cli`, que é dependência de desenvolvimento. Rode a partir de uma instalação completa (`npm ci`), na sua máquina ou em uma etapa de release/CI:
+
+```bash
+cd backend
+npm ci
+npx sequelize-cli db:migrate --url "$DATABASE_URL"
+```
+
+Rode esse comando **a cada deploy** que trouxer migrations novas (pasta `backend/migrations/`). Para conferir o estado: `npx sequelize-cli db:migrate:status --url "$DATABASE_URL"`.
+
+**2. Primeiro acesso: criar a clínica e o administrador**
+
+Não existe cadastro público: criar usuários e clínicas exige um admin logado. O primeiro admin precisa ser criado direto no banco. Gere o hash da senha (mínimo de 8 caracteres, com maiúscula, minúscula e número, ou o login será recusado):
+
+```bash
+cd backend
+node -e "require('bcrypt').hash(process.argv[1], 10).then(console.log)" 'SuaSenhaForte123'
+```
+
+E execute no banco, substituindo os dados e o `<HASH>`:
+
+```sql
+WITH c AS (
+  INSERT INTO clinicas (razao_social, cnpj, email, telefone)
+  VALUES ('Nome da Clínica LTDA', '12345678000190', 'contato@clinica.com.br', '61999999999')
+  RETURNING id
+)
+INSERT INTO usuarios (clinica_id, nome, email, password_hash, role)
+SELECT id, 'Nome do Admin', 'admin@clinica.com.br', '<HASH>', 'admin' FROM c;
+```
+
+Depois disso, o admin cadastra os demais usuários da clínica pelo endpoint `POST /api/auth/register`. **Não rode o `seed.js` em produção**: ele cria um admin com senha pública.
+
+**3. Backend (API)**
+
+```bash
+cd backend
+npm ci --omit=dev
+npm start
+```
+
+- Health check: `GET /` deve responder `{"message":"API MedVet está funcionando!"}`.
+- Sempre rode `npm ci` no servidor: a pasta `backend/node_modules` está versionada no git por engano e não deve ser usada.
+- O rate limit é guardado em memória: com mais de uma instância da API, cada uma conta separadamente. Rode **uma instância** ou troque o store do `express-rate-limit`.
+- O HTTPS deve ser terminado no proxy ou na plataforma; a API escuta HTTP puro.
+
+**4. Frontend**
+
+```bash
+cd frontend
+npm ci
+VITE_API_URL=https://api.exemplo.com.br/api npm run build
+```
+
+Publique o conteúdo de `frontend/dist/`. O app usa rotas com *history mode*, então o servidor precisa devolver o `index.html` para qualquer rota desconhecida, ou recarregar a página em `/pacientes` dará 404. Exemplo no Nginx:
+
+```nginx
+location / {
+  try_files $uri $uri/ /index.html;
+}
+```
+
+(Netlify: arquivo `_redirects` com `/* /index.html 200`. Vercel: rewrite de `/(.*)` para `/index.html`.)
+
+### Checklist de deploy
+
+- [ ] `DATABASE_URL` configurada (com `?sslmode=require` se o provedor exigir)
+- [ ] Migrations aplicadas (`db:migrate:status` todas como `up`)
+- [ ] `SECRETKEY` longa e aleatória, diferente da usada em desenvolvimento
+- [ ] `CORS_ORIGIN` igual à URL do frontend publicado
+- [ ] `TRUST_PROXY=1` se houver proxy ou plataforma à frente da API
+- [ ] Frontend construído com `VITE_API_URL` apontando para a API
+- [ ] Fallback para `index.html` configurado na hospedagem do frontend
+- [ ] Primeiro admin criado e login testado
+- [ ] `seed.js` **não** executado no banco de produção
+
+### Limitações conhecidas
+
+- As respostas de erro dos controllers incluem a mensagem original do banco (`details`) mesmo com `NODE_ENV=production`.
+- O token JWT fica no `localStorage` e vale por 7 dias; não há logout no servidor nem renovação de token.
+- Não há endpoint para editar os dados da clínica; alterações precisam ser feitas no banco.
 
 ## 🌳 Estrutura do Projeto
 
