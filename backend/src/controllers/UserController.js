@@ -137,7 +137,12 @@ const updateUser = async (req, res) => {
             });
         }
 
-        let passwordHash = null; 
+        // Mesma política do cadastro: senha fora dela seria recusada no login
+        if ((!isUndefined(email) && invalidEmail(email)) || (!isUndefined(password) && invalidPassword(password))) {
+            return res.status(400).json({ error: 'Dados inválidos' });
+        }
+
+        let passwordHash = null;
 
         if (password) {
             passwordHash = await encryptPassword(password.trim()); 
@@ -181,7 +186,8 @@ const deleteUser = async (req, res) =>{
         const {id} = req.params;
         const clinica_id = req.user.clinicaId;
 
-        if(Number(id) === req.user.id) {
+        // O id do token vem como string (BIGINT do PostgreSQL)
+        if(Number(id) === Number(req.user.id)) {
             return res.status(400).json({
                 error: 'Você não pode excluir sua própria conta'
             });

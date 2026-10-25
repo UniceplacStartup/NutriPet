@@ -20,28 +20,28 @@ router.post('/auth/register', authenticateToken, checkRole('admin'), UserControl
 router.post('/auth/login', loginLimiter, UserController.login);
 
 router.get(
-    '/api/usuarios',
+    '/usuarios',
     authenticateToken,
     checkRole('admin'),
     UserController.listUsers
 );
 
 router.get(
-    '/api/usuarios/:id',
+    '/usuarios/:id',
     authenticateToken,
     checkRole('admin'),
     UserController.getUserById
 );
 
 router.put(
-    '/api/usuarios/:id',
+    '/usuarios/:id',
     authenticateToken,
     checkRole('admin'),
     UserController.updateUser
 );
 
 router.delete(
-    '/api/usuarios/:id',
+    '/usuarios/:id',
     authenticateToken,
     checkRole('admin'),
     UserController.deleteUser
