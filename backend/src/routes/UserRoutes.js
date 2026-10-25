@@ -19,4 +19,32 @@ const loginLimiter = rateLimit({
 router.post('/auth/register', authenticateToken, checkRole('admin'), UserController.register);
 router.post('/auth/login', loginLimiter, UserController.login);
 
+router.get(
+    '/api/usuarios',
+    authenticateToken,
+    checkRole('admin'),
+    UserController.listUsers
+);
+
+router.get(
+    '/api/usuarios/:id',
+    authenticateToken,
+    checkRole('admin'),
+    UserController.getUserById
+);
+
+router.put(
+    '/api/usuarios/:id',
+    authenticateToken,
+    checkRole('admin'),
+    UserController.updateUser
+);
+
+router.delete(
+    '/api/usuarios/:id',
+    authenticateToken,
+    checkRole('admin'),
+    UserController.deleteUser
+);
+
 module.exports = router;

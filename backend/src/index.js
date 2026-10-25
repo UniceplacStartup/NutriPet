@@ -69,7 +69,7 @@ app.use('/api', formCalculationRoutes);
 // Middleware global de erro sempre por ultimo
 app.use(errorHandler);
 
-const tutorRoutes = require('./routes/tutorRoutes'); 
+
 app.use('/api', tutorRoutes);
 
 app.listen(PORT, () => {
