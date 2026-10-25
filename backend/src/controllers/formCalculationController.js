@@ -1,5 +1,7 @@
 const db = require('../config/database');
+const { respondWithError } = require('../utils/dbErrors');
 const { computeFormCalculation, saveFormCalculation } = require('../services/calculationService');
+const { invalidId } = require('../utils/validateInput');
 
 function normalizeCalcRow(row) {
   if (!row) return row;
@@ -23,9 +25,9 @@ function normalizeCalcRow(row) {
 // Create (upsert by formulario_id)
 const upsertFormCalculation = async (req, res) => {
   try {
-    const { formulario_id } = req.body;
-    let { em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia, auto } = req.body;
-    if (!formulario_id) return res.status(400).json({ error: 'formulario_id é obrigatório' });
+    const { formulario_id } = req.body ?? {};
+    let { em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia, auto } = req.body ?? {};
+    if (invalidId(formulario_id)) return res.status(400).json({ error: 'formulario_id é obrigatório' });
 
     // Verificar se o formulário pertence à clínica
     const { rows: formRows } = await db.query(
@@ -63,13 +65,16 @@ const upsertFormCalculation = async (req, res) => {
       throw e;
     }
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao salvar cálculo', details: err.message });
+    return respondWithError(res, err, 'Erro ao salvar cálculo');
   }
 };
 
 const listFormCalculations = async (req, res) => {
   try {
     const { formulario_id } = req.query;
+    if (formulario_id !== undefined && invalidId(formulario_id)) {
+      return res.status(400).json({ error: 'formulario_id inválido' });
+    }
     let sql = `
       SELECT c.* FROM calculos_formulario c
       JOIN formularios_dieteticos f ON c.formulario_id = f.id
@@ -84,7 +89,7 @@ const listFormCalculations = async (req, res) => {
     const { rows } = await db.query(sql, params);
     return res.status(200).json(rows.map(normalizeCalcRow));
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao listar cálculos', details: err.message });
+    return respondWithError(res, err, 'Erro ao listar cálculos');
   }
 };
 
@@ -100,7 +105,7 @@ const getFormCalculationById = async (req, res) => {
     if (!rows.length) return res.status(404).json();
     return res.status(200).json(normalizeCalcRow(rows[0]));
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao buscar cálculo', details: err.message });
+    return respondWithError(res, err, 'Erro ao buscar cálculo');
   }
 };
 
@@ -116,7 +121,7 @@ const deleteFormCalculation = async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json();
     return res.status(204).json();
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao deletar cálculo', details: err.message });
+    return respondWithError(res, err, 'Erro ao deletar cálculo');
   }
 };
 
@@ -124,7 +129,7 @@ const deleteFormCalculation = async (req, res) => {
 const computeOnly = async (req, res) => {
   try {
     const { formulario_id } = req.query;
-    if (!formulario_id) return res.status(400).json({ error: 'formulario_id é obrigatório' });
+    if (invalidId(formulario_id)) return res.status(400).json({ error: 'formulario_id é obrigatório' });
 
     // Verificar se o formulário pertence à clínica
     const { rows: formRows } = await db.query(
@@ -136,7 +141,7 @@ const computeOnly = async (req, res) => {
     const result = await computeFormCalculation(Number(formulario_id));
     return res.status(200).json({ formulario_id: Number(formulario_id), ...result });
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao calcular', details: err.message });
+    return respondWithError(res, err, 'Erro ao calcular');
   }
 };
 

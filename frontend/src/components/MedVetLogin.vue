@@ -27,15 +27,15 @@
 
       <div class="opcoes">
         <a href="#" class="esquecer"><strong>Esqueci a senha</strong></a>
-        <a href="#" class="criar"><strong>Criar uma conta</strong></a>
+        <RouterLink to="/cadastro" class="criar"><strong>Criar uma conta</strong></RouterLink>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -43,6 +43,11 @@ const authStore = useAuthStore()
 
 const email = ref('')
 const senha = ref('')
+
+// Não mostra erro que sobrou da tela de cadastro
+onMounted(() => {
+  authStore.error = null
+})
 
 async function handleLogin() {
   const success = await authStore.login(email.value, senha.value)

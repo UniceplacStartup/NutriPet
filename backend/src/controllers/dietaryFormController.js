@@ -1,5 +1,6 @@
 const db = require('../config/database');
-const { isUndefined } = require('../utils/validateInput');
+const { respondWithError } = require('../utils/dbErrors');
+const { invalidId } = require('../utils/validateInput');
 const NutritionalCalculator = require('../services/NutritionalCalculator');
 const { saveFormCalculation } = require('../services/calculationService');
 const PDFDocument = require('pdfkit');
@@ -26,9 +27,18 @@ const validarDadosNutricionais = (paciente, { peso_atual, condicao, detalhes }) 
 
 const createDietaryForm = async (req, res) => {
   try {
-    const { paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes } = req.body;
-    if (isUndefined(paciente_id) || isUndefined(peso_atual)) {
+    const { paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes } = req.body ?? {};
+    if (invalidId(paciente_id) || peso_atual === undefined) {
       return res.status(400).json({ error: 'paciente_id e peso_atual são obrigatórios' });
+    }
+
+    // Responsável pelo preenchimento: quem está logado, ou outro usuário da mesma clínica
+    let responsavelId = req.user.id;
+    if (usuario_id !== undefined && usuario_id !== null && usuario_id !== '') {
+      if (invalidId(usuario_id)) return res.status(400).json({ error: 'usuario_id inválido' });
+      const { rows: usuarioRows } = await db.query('SELECT id FROM usuarios WHERE id = $1 AND clinica_id = $2', [Number(usuario_id), req.user.clinicaId]);
+      if (!usuarioRows.length) return res.status(400).json({ error: 'usuario_id não pertence à sua clínica' });
+      responsavelId = usuarioRows[0].id;
     }
 
     // Verificar se o paciente pertence à clínica do usuário e buscar dados completos
@@ -44,7 +54,7 @@ const createDietaryForm = async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO formularios_dieteticos (paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [Number(paciente_id), usuario_id ? Number(usuario_id) : null, peso_atual, condicoes_clinicas || null, observacoes_vet || null,
+      [Number(paciente_id), responsavelId, peso_atual, condicoes_clinicas || null, observacoes_vet || null,
       dadosNutricionais.condicao, dadosNutricionais.detalhes]
     );
 
@@ -60,13 +70,16 @@ const createDietaryForm = async (req, res) => {
 
     return res.status(201).json(formulario);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao criar formulário', details: err.message });
+    return respondWithError(res, err, 'Erro ao criar formulário');
   }
 };
 
 const listDietaryForms = async (req, res) => {
   try {
     const { paciente_id } = req.query;
+    if (paciente_id !== undefined && invalidId(paciente_id)) {
+      return res.status(400).json({ error: 'paciente_id inválido' });
+    }
     let sql = `
       SELECT f.* 
       FROM formularios_dieteticos f
@@ -82,7 +95,7 @@ const listDietaryForms = async (req, res) => {
     const { rows } = await db.query(sql, params);
     return res.status(200).json(rows);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao listar formulários', details: err.message });
+    return respondWithError(res, err, 'Erro ao listar formulários');
   }
 };
 
@@ -90,7 +103,7 @@ const getDietaryFormById = async (req, res) => {
   try {
     return res.status(200).json(req.formulario);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao buscar formulário', details: err.message });
+    return respondWithError(res, err, 'Erro ao buscar formulário');
   }
 };
 
@@ -136,7 +149,7 @@ const updateDietaryForm = async (req, res) => {
 
     return res.status(200).json(formularioAtualizado);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao atualizar formulário', details: err.message });
+    return respondWithError(res, err, 'Erro ao atualizar formulário');
   }
 };
 
@@ -150,7 +163,7 @@ const deleteDietaryForm = async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json();
     return res.status(204).json();
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao deletar formulário', details: err.message });
+    return respondWithError(res, err, 'Erro ao deletar formulário');
   }
 };
 
@@ -202,7 +215,9 @@ const generatePdfReport = async (req, res) => {
       doc.fontSize(14).text('Cálculos Nutricionais:');
       doc.fontSize(12).text(`EM Total: ${calculo.em_total_kcal_dia} kcal/dia`);
       doc.text(`NEM: ${calculo.nem_calculada_kcal_dia} kcal/dia`);
-      doc.text(`Quantidade Recomendada: ${calculo.quantidade_racao_recomendada_g_dia} g/dia`);
+      // Sem alimentos cadastrados não há como calcular a quantidade
+      const quantidade = calculo.quantidade_racao_recomendada_g_dia;
+      doc.text(`Quantidade Recomendada: ${quantidade === null ? 'não calculada (cadastre os alimentos)' : `${quantidade} g/dia`}`);
     }
 
     // Finaliza stream do documento

@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit')
 const UserController = require('../controllers/UserController');
 const { authenticateToken } = require('../middlewares/auth');
 const { checkRole } = require('../middlewares/checkRole');
+const { validateIdParam } = require('../middlewares/validateIdParam');
 
 const router = Router();
 
@@ -13,9 +14,25 @@ const loginLimiter = rateLimit({
         error: 'Muitas tentativas de login, tente novamente em 15 minutos.'
     },
     standardHeaders: true,
+    legacyHeaders: false,
+    // Conta só as tentativas que falharam: logins certos não bloqueiam ninguém
+    skipSuccessfulRequests: true
+});
+
+const signupLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hora
+    max: 10,
+    message: {
+        error: 'Muitos cadastros a partir deste endereço, tente novamente mais tarde.'
+    },
+    standardHeaders: true,
     legacyHeaders: false
 });
 
+router.param('id', validateIdParam);
+
+// Cadastro público de clínica + admin, liberado para quem tem matrícula da faculdade
+router.post('/auth/cadastro', signupLimiter, UserController.signup);
 router.post('/auth/register', authenticateToken, checkRole('admin'), UserController.register);
 router.post('/auth/login', loginLimiter, UserController.login);
 

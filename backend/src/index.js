@@ -62,8 +62,7 @@ const formCalculationRoutes = require('./routes/formCalculationRoutes');
 
 const errorHandler = require('./middlewares/errorHandler');
 
-// UserRoutes primeiro: os outros routers aplicam authenticateToken a todo /api,
-// o que bloquearia o /api/auth/login
+// Cada router aplica authenticateToken só no prefixo do seu recurso
 app.use('/api', UserRoutes);   // Auth
 app.use('/api', clinicRoutes); // RF02: Clínica
 app.use('/api', tutorRoutes);  // Tutores CRUD
@@ -72,6 +71,11 @@ app.use('/api', dietaryFormRoutes);
 app.use('/api', consumedFoodRoutes);
 app.use('/api', consumedSupplementRoutes);
 app.use('/api', formCalculationRoutes);
+
+// Rota inexistente
+app.use((req, res) => {
+  res.status(404).json({ error: 'Rota não encontrada' });
+});
 
 // Middleware global de erro sempre por ultimo
 app.use(errorHandler);
