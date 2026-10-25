@@ -47,7 +47,37 @@
           <div class="form-row">
             <div class="form-group">
               <label>Peso Atual (kg) *</label>
-              <input v-model.number="formularioForm.peso_atual" type="number" step="0.1" required />
+              <input v-model.number="formularioForm.peso_atual" type="number" step="0.1" min="0.1" required />
+            </div>
+            <div class="form-group">
+              <label>Condição do Animal *</label>
+              <select v-model="formularioForm.condicao" required :disabled="!condicoesDisponiveis.length">
+                <option v-if="!condicoesDisponiveis.length" value="">Selecione um paciente</option>
+                <option v-for="c in condicoesDisponiveis" :key="c.value" :value="c.value">
+                  {{ c.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="formularioForm.condicao === 'filhote'" class="form-row">
+            <div class="form-group">
+              <label>Peso Adulto Esperado (kg) *</label>
+              <input v-model.number="detalhesForm.pesoAdultoEsperado" type="number" step="0.1" min="0.1" required />
+            </div>
+          </div>
+
+          <div v-if="formularioForm.condicao === 'lactante'" class="form-row">
+            <div class="form-group">
+              <label>Semana de Lactação *</label>
+              <select v-model.number="detalhesForm.semana" required>
+                <option :value="null">Selecione</option>
+                <option v-for="s in 4" :key="s" :value="s">{{ s }}ª semana</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Número de Filhotes *</label>
+              <input v-model.number="detalhesForm.numeroFilhotes" type="number" step="1" min="1" required />
             </div>
           </div>
 
@@ -59,6 +89,7 @@
           <button type="submit" class="btn-primary" :disabled="loading">
             {{ loading ? 'Criando...' : 'Criar Formulário' }}
           </button>
+          <div v-if="error" class="error">{{ error }}</div>
         </form>
       </div>
 
@@ -88,6 +119,13 @@
             <div class="form-group">
               <label>Quantidade (g/dia) *</label>
               <input v-model.number="alimentoForm.quantidade_g_dia" type="number" step="0.1" required />
+            </div>
+            <div class="form-group">
+              <label>Tipo *</label>
+              <select v-model="alimentoForm.tipo" required>
+                <option value="seco">Seco</option>
+                <option value="umido">Úmido</option>
+              </select>
             </div>
           </div>
 
@@ -208,6 +246,10 @@
                 <span class="summary-value">{{ formularioForm.peso_atual }} kg</span>
               </div>
               <div class="summary-item">
+                <span class="summary-label">Condição</span>
+                <span class="summary-value">{{ labelCondicao }}</span>
+              </div>
+              <div class="summary-item">
                 <span class="summary-label">Peso Ideal</span>
                 <span class="summary-value">{{ selectedPatient.peso_ideal }} kg</span>
               </div>
@@ -274,15 +316,80 @@ const error = ref<string | null>(null)
 const step = ref(1)
 const selectedPatient = ref<any>(null)
 
+// Condições aceitas pelo NEMCalculator do backend; a primeira é o padrão da espécie
+const CONDICOES: Record<string, { value: string; label: string }[]> = {
+  cao: [
+    { value: 'adulto_ativo', label: 'Adulto ativo' },
+    { value: 'jovem_ativo', label: 'Jovem adulto ativo' },
+    { value: 'inativo', label: 'Inativo / sedentário' },
+    { value: 'idoso', label: 'Idoso' },
+    { value: 'terrier', label: 'Terrier (alta energia)' },
+    { value: 'dogue_alemao', label: 'Dogue alemão' },
+    { value: 'filhote', label: 'Filhote' },
+    { value: 'gestante', label: 'Gestante' },
+    { value: 'lactante', label: 'Lactante' },
+  ],
+  gato: [
+    { value: 'adulto', label: 'Adulto' },
+    { value: 'magro', label: 'Adulto magro' },
+    { value: 'obeso', label: 'Obeso' },
+    { value: 'idoso', label: 'Idoso' },
+    { value: 'filhote', label: 'Filhote' },
+    { value: 'gestante', label: 'Gestante' },
+    { value: 'lactante', label: 'Lactante' },
+  ],
+}
+
 const formularioForm = ref({
   paciente_id: '',
   data_avaliacao: new Date().toISOString().split('T')[0],
   peso_atual: null as number | null,
+  condicao: '',
   observacoes: '',
 })
 
+const detalhesForm = ref({
+  pesoAdultoEsperado: null as number | null,
+  semana: null as number | null,
+  numeroFilhotes: null as number | null,
+})
+
+// IDs chegam do backend como string (BIGINT)
+const pacienteFormulario = computed(() =>
+  pacientes.value.find((p) => String(p.id) === String(formularioForm.value.paciente_id)),
+)
+const condicoesDisponiveis = computed(() => CONDICOES[pacienteFormulario.value?.especie] ?? [])
+
+watch(
+  () => formularioForm.value.paciente_id,
+  () => {
+    formularioForm.value.condicao = condicoesDisponiveis.value[0]?.value ?? ''
+  },
+)
+
+const labelCondicao = computed(
+  () => condicoesDisponiveis.value.find((c) => c.value === formularioForm.value.condicao)?.label ?? '-',
+)
+
+function montarDetalhes() {
+  const d = detalhesForm.value
+  if (formularioForm.value.condicao === 'filhote') {
+    return { pesoAdultoEsperado: d.pesoAdultoEsperado }
+  }
+  if (formularioForm.value.condicao === 'lactante') {
+    if (pacienteFormulario.value?.especie === 'cao') {
+      // A fórmula de cães separa os filhotes até o 4º (n1a4) dos demais (n5a8)
+      const n = d.numeroFilhotes || 0
+      return { semana: d.semana, n1a4: Math.min(n, 4), n5a8: Math.max(n - 4, 0) }
+    }
+    return { semana: d.semana, numeroFilhotes: d.numeroFilhotes }
+  }
+  return null
+}
+
 const alimentoForm = ref({
   nome_alimento: '',
+  tipo: 'seco',
   quantidade_g_dia: null as number | null,
   proteina_bruta_p: null as number | null,
   extrato_etereo_p: null as number | null,
@@ -329,12 +436,15 @@ async function criarFormulario() {
     error.value = null
 
     const response = await formulariosAPI.create({
-      ...formularioForm.value,
       paciente_id: Number(formularioForm.value.paciente_id),
+      peso_atual: formularioForm.value.peso_atual,
+      condicao: formularioForm.value.condicao || null,
+      detalhes: montarDetalhes(),
+      observacoes_vet: formularioForm.value.observacoes || null,
     })
 
     currentFormularioId.value = response.id
-    selectedPatient.value = pacientes.value.find(p => p.id === Number(formularioForm.value.paciente_id))
+    selectedPatient.value = pacienteFormulario.value
     step.value = 2
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Erro ao criar formulário'
@@ -351,6 +461,7 @@ async function adicionarAlimento() {
     await alimentosAPI.create({
       formulario_id: currentFormularioId.value,
       descricao_alimento: alimentoForm.value.nome_alimento, // Renomear para descricao_alimento
+      tipo: alimentoForm.value.tipo,
       quantidade_g_dia: alimentoForm.value.quantidade_g_dia, // Certifique-se de que este campo está preenchido
       proteina_bruta_p: alimentoForm.value.proteina_bruta_p,
       extrato_etereo_p: alimentoForm.value.extrato_etereo_p,
@@ -358,9 +469,10 @@ async function adicionarAlimento() {
       fibra_bruta_p: alimentoForm.value.fibra_bruta_p,
     })
 
-    // Reset form
+    // Reset form (mantém o tipo para o próximo alimento)
     alimentoForm.value = {
       nome_alimento: '',
+      tipo: alimentoForm.value.tipo,
       quantidade_g_dia: null,
       proteina_bruta_p: null,
       extrato_etereo_p: null,
@@ -429,12 +541,15 @@ function resetFormulario() {
     paciente_id: '',
     data_avaliacao: new Date().toISOString().split('T')[0],
     peso_atual: null,
+    condicao: '',
     observacoes: '',
   }
+  detalhesForm.value = { pesoAdultoEsperado: null, semana: null, numeroFilhotes: null }
 }
 
+// quantidade_g_dia chega como string (DECIMAL)
 const alimentosTotalQtd = computed(() => {
-  return alimentos.value.reduce((total, a) => total + (a.quantidade_g_dia || 0), 0)
+  return alimentos.value.reduce((total, a) => total + (Number(a.quantidade_g_dia) || 0), 0)
 })
 
 const pesoComparacao = computed(() => {

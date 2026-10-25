@@ -1,59 +1,22 @@
 const db = require('../config/database');
+const NutritionalCalculator = require('./NutritionalCalculator');
 
 // Helpers
 const round2 = (n) => (n === null || n === undefined || isNaN(n) ? null : Math.round(n * 100) / 100);
 
-// Atwater modificado (kcal/g)
-const FACTOR_PROTEIN = 3.5;
-const FACTOR_FAT = 8.5;
-const FACTOR_NFE = 3.5;
-
 async function getFormById(formulario_id) {
-  const { rows } = await db.query('SELECT id, paciente_id, peso_atual FROM formularios_dieteticos WHERE id=$1', [Number(formulario_id)]);
+  const { rows } = await db.query('SELECT * FROM formularios_dieteticos WHERE id=$1', [Number(formulario_id)]);
   return rows[0];
 }
 
 async function getPatientById(paciente_id) {
-  const { rows } = await db.query('SELECT id, especie FROM pacientes WHERE id=$1', [Number(paciente_id)]);
+  const { rows } = await db.query('SELECT * FROM pacientes WHERE id=$1', [Number(paciente_id)]);
   return rows[0];
 }
 
 async function getFoodsByFormId(formulario_id) {
-  const { rows } = await db.query(
-    `SELECT id, quantidade_g_dia,
-            proteina_bruta_p, extrato_etereo_p, extrativo_nao_nitrogenado_p
-       FROM alimentos_consumidos
-      WHERE formulario_id=$1`,
-    [Number(formulario_id)]
-  );
+  const { rows } = await db.query('SELECT * FROM alimentos_consumidos WHERE formulario_id=$1', [Number(formulario_id)]);
   return rows;
-}
-
-function computeEMFromFoods(foods) {
-  let totalKcal = 0;
-  let totalGrams = 0;
-  for (const f of foods) {
-    const qty = Number(f.quantidade_g_dia) || 0;
-    const prot_g = qty * ((Number(f.proteina_bruta_p) || 0) / 100);
-    const fat_g = qty * ((Number(f.extrato_etereo_p) || 0) / 100);
-    const nfe_g = qty * ((Number(f.extrativo_nao_nitrogenado_p) || 0) / 100);
-    const kcal = FACTOR_PROTEIN * prot_g + FACTOR_FAT * fat_g + FACTOR_NFE * nfe_g;
-    totalKcal += kcal;
-    totalGrams += qty;
-  }
-  return { totalKcal: round2(totalKcal), totalGrams: round2(totalGrams) };
-}
-
-function computeRERKg(weightKg) {
-  if (!weightKg || weightKg <= 0) return null;
-  return 70 * Math.pow(Number(weightKg), 0.75);
-}
-
-function defaultMaintenanceFactor(specie) {
-  // Fatores simplificados para demo
-  if (specie === 'cao') return 1.6; // cão adulto castrado
-  if (specie === 'gato') return 1.2; // gato adulto castrado
-  return 1.4; // fallback
 }
 
 async function computeFormCalculation(formulario_id) {
@@ -65,26 +28,32 @@ async function computeFormCalculation(formulario_id) {
 
   const foods = await getFoodsByFormId(formulario_id);
 
-  const { totalKcal: em_total_kcal_dia, totalGrams } = computeEMFromFoods(foods);
-  const rer = computeRERKg(Number(form.peso_atual));
-  let nem_calculada_kcal_dia = null;
-  if (rer !== null) {
-    nem_calculada_kcal_dia = rer * defaultMaintenanceFactor(patient.especie);
-  }
-
-  let quantidade_racao_recomendada_g_dia = null;
-  if (nem_calculada_kcal_dia !== null && totalGrams && totalGrams > 0 && em_total_kcal_dia && em_total_kcal_dia > 0) {
-    const densidade = em_total_kcal_dia / totalGrams; // kcal por grama da dieta atual
-    quantidade_racao_recomendada_g_dia = nem_calculada_kcal_dia / densidade;
-  }
+  const calculo = NutritionalCalculator.calcular(patient, form, foods);
 
   return {
-    em_total_kcal_dia: round2(em_total_kcal_dia),
-    nem_calculada_kcal_dia: round2(nem_calculada_kcal_dia),
-    quantidade_racao_recomendada_g_dia: round2(quantidade_racao_recomendada_g_dia),
+    em_total_kcal_dia: round2(calculo.emTotal),
+    nem_calculada_kcal_dia: round2(calculo.nem),
+    quantidade_racao_recomendada_g_dia: round2(calculo.quantidadeRecomendada),
+    condicao: calculo.condicao,
   };
+}
+
+// Calcula e persiste (relação 1:1 com o formulário)
+async function saveFormCalculation(formulario_id) {
+  const calculo = await computeFormCalculation(formulario_id);
+  const { rows } = await db.query(`
+    INSERT INTO calculos_formulario (formulario_id, em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (formulario_id) DO UPDATE SET
+      em_total_kcal_dia = EXCLUDED.em_total_kcal_dia,
+      nem_calculada_kcal_dia = EXCLUDED.nem_calculada_kcal_dia,
+      quantidade_racao_recomendada_g_dia = EXCLUDED.quantidade_racao_recomendada_g_dia
+    RETURNING *
+  `, [Number(formulario_id), calculo.em_total_kcal_dia, calculo.nem_calculada_kcal_dia, calculo.quantidade_racao_recomendada_g_dia]);
+  return { ...rows[0], condicao: calculo.condicao };
 }
 
 module.exports = {
   computeFormCalculation,
+  saveFormCalculation,
 };
