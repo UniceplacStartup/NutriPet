@@ -1,5 +1,5 @@
 const db = require('../config/database');
-const { computeFormCalculation } = require('../services/calculationService');
+const { computeFormCalculation, saveFormCalculation } = require('../services/calculationService');
 
 function normalizeCalcRow(row) {
   if (!row) return row;
@@ -34,15 +34,13 @@ const upsertFormCalculation = async (req, res) => {
     );
     if (!formRows.length) return res.status(403).json({ error: 'Acesso negado: formulário não pertence à sua clínica' });
 
-    // Se 'auto' for true, ou se não vierem valores, calcula automaticamente
+    // Se 'auto' for true, ou se não vierem valores, calcula e persiste automaticamente
     if (auto === true || (em_total_kcal_dia === undefined && nem_calculada_kcal_dia === undefined && quantidade_racao_recomendada_g_dia === undefined)) {
-      const calculated = await computeFormCalculation(Number(formulario_id));
-      em_total_kcal_dia = calculated.em_total_kcal_dia;
-      nem_calculada_kcal_dia = calculated.nem_calculada_kcal_dia;
-      quantidade_racao_recomendada_g_dia = calculated.quantidade_racao_recomendada_g_dia;
+      const saved = await saveFormCalculation(Number(formulario_id));
+      return res.status(200).json(normalizeCalcRow(saved));
     }
 
-    // Upsert
+    // Upsert manual
     try {
       const insert = await db.query(
         `INSERT INTO calculos_formulario(formulario_id, em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia)
