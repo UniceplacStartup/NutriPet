@@ -57,8 +57,10 @@ const formCalculationRoutes = require('./routes/formCalculationRoutes');
 
 const errorHandler = require('./middlewares/errorHandler');
 
-app.use('/api', clinicRoutes); // RF02: Clínica
+// UserRoutes primeiro: os outros routers aplicam authenticateToken a todo /api,
+// o que bloquearia o /api/auth/login
 app.use('/api', UserRoutes);   // Auth
+app.use('/api', clinicRoutes); // RF02: Clínica
 app.use('/api', tutorRoutes);  // Tutores CRUD
 app.use('/api', patientRoutes);
 app.use('/api', dietaryFormRoutes);
@@ -68,9 +70,6 @@ app.use('/api', formCalculationRoutes);
 
 // Middleware global de erro sempre por ultimo
 app.use(errorHandler);
-
-
-app.use('/api', tutorRoutes);
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
