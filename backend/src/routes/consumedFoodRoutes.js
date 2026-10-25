@@ -1,11 +1,14 @@
 const { Router } = require('express');
 const controller = require('../controllers/consumedFoodController');
 const { authenticateToken } = require('../middlewares/auth');
+const { validateIdParam } = require('../middlewares/validateIdParam');
 const { checkRole } = require('../middlewares/checkRole');
 
 const router = Router();
 
-router.use(authenticateToken);
+// Só no prefixo do recurso: aplicado a todo /api, barraria as rotas de outros routers
+router.use('/alimentos', authenticateToken);
+router.param('id', validateIdParam);
 
 router.post('/alimentos', checkRole('admin', 'veterinario'), controller.createConsumedFood);
 router.get('/alimentos', checkRole('admin', 'veterinario', 'atendente'), controller.listConsumedFoods);

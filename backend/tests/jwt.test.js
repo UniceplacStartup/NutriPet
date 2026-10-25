@@ -11,6 +11,7 @@ test('get subject from token', () => {
     const user = new User.User('1', '2', '3', '4', '5');
     const token = createToken(user);
     const subject = getSubjectFromToken(token); 
-    expect(subject.nome).toBe('2');
+    // O token não carrega o nome, só id, clínica, papel e e-mail
+    expect(subject.email).toBe('3');
     expect(subject.role).toBe('4');
 });

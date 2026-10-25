@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authAPI } from '@/services/api'
+import { authAPI, type CadastroData } from '@/services/api'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -33,6 +33,27 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function cadastrar(data: CadastroData) {
+    try {
+      isLoading.value = true
+      error.value = null
+
+      const response = await authAPI.cadastro(data)
+
+      token.value = response.token
+      user.value = response.user
+
+      localStorage.setItem('medvet_token', response.token)
+
+      return true
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Erro ao criar conta'
+      return false
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   function logout() {
     token.value = null
     user.value = null
@@ -46,6 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
     error,
     isAuthenticated,
     login,
+    cadastrar,
     logout,
   }
 })

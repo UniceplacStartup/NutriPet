@@ -1,11 +1,15 @@
 const db = require('../config/database');
-const { isUndefined } = require('../utils/validateInput');
+const { respondWithError } = require('../utils/dbErrors');
+const { invalidId, invalidText, invalidOptionalText, toOptionalText } = require('../utils/validateInput');
 
 const createConsumedSupplement = async (req, res) => {
   try {
-    const { formulario_id, descricao, quantidade, frequencia } = req.body;
-    if (isUndefined(formulario_id) || isUndefined(descricao)) {
+    const { formulario_id, descricao, quantidade, frequencia } = req.body ?? {};
+    if (invalidId(formulario_id) || invalidText(descricao)) {
       return res.status(400).json({ error: 'formulario_id e descricao são obrigatórios' });
+    }
+    if (invalidOptionalText(quantidade) || invalidOptionalText(frequencia)) {
+      return res.status(400).json({ error: 'quantidade e frequencia devem ser texto' });
     }
 
     // Verificar se o formulário pertence à clínica
@@ -18,17 +22,20 @@ const createConsumedSupplement = async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO suplementos_consumidos(formulario_id, descricao, quantidade, frequencia)
        VALUES($1,$2,$3,$4) RETURNING *`,
-      [Number(formulario_id), descricao?.trim(), quantidade?.trim() || null, frequencia?.trim() || null]
+      [Number(formulario_id), descricao.trim(), toOptionalText(quantidade), toOptionalText(frequencia)]
     );
     return res.status(201).json(rows[0]);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao adicionar suplemento', details: err.message });
+    return respondWithError(res, err, 'Erro ao adicionar suplemento');
   }
 };
 
 const listConsumedSupplements = async (req, res) => {
   try {
     const { formulario_id } = req.query;
+    if (formulario_id !== undefined && invalidId(formulario_id)) {
+      return res.status(400).json({ error: 'formulario_id inválido' });
+    }
     let sql = `
       SELECT s.* FROM suplementos_consumidos s
       JOIN formularios_dieteticos f ON s.formulario_id = f.id
@@ -44,7 +51,7 @@ const listConsumedSupplements = async (req, res) => {
     const { rows } = await db.query(sql, params);
     return res.status(200).json(rows);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao listar suplementos', details: err.message });
+    return respondWithError(res, err, 'Erro ao listar suplementos');
   }
 };
 
@@ -60,14 +67,18 @@ const getConsumedSupplementById = async (req, res) => {
     if (!rows.length) return res.status(404).json();
     return res.status(200).json(rows[0]);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao buscar suplemento', details: err.message });
+    return respondWithError(res, err, 'Erro ao buscar suplemento');
   }
 };
 
 const updateConsumedSupplement = async (req, res) => {
   try {
     const { id } = req.params;
-    const { descricao, quantidade, frequencia } = req.body;
+    const { descricao, quantidade, frequencia } = req.body ?? {};
+    if ((descricao !== undefined && invalidText(descricao)) || invalidOptionalText(quantidade) || invalidOptionalText(frequencia)) {
+      return res.status(400).json({ error: 'Dados inválidos' });
+    }
+    const textoOuNull = (v) => (v === undefined || v === null ? null : String(v).trim());
     const { rows } = await db.query(
       `UPDATE suplementos_consumidos SET
         descricao = COALESCE($1, descricao),
@@ -76,12 +87,12 @@ const updateConsumedSupplement = async (req, res) => {
        WHERE id=$4 AND formulario_id IN (
          SELECT f.id FROM formularios_dieteticos f JOIN pacientes p ON f.paciente_id = p.id WHERE p.clinica_id = $5
        ) RETURNING *`,
-      [descricao?.trim() ?? null, quantidade?.trim() ?? null, frequencia?.trim() ?? null, Number(id), req.user.clinicaId]
+      [descricao?.trim() ?? null, textoOuNull(quantidade), textoOuNull(frequencia), Number(id), req.user.clinicaId]
     );
     if (!rows.length) return res.status(404).json();
     return res.status(200).json(rows[0]);
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao atualizar suplemento', details: err.message });
+    return respondWithError(res, err, 'Erro ao atualizar suplemento');
   }
 };
 
@@ -97,7 +108,7 @@ const deleteConsumedSupplement = async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json();
     return res.status(204).json();
   } catch (err) {
-    return res.status(500).json({ error: 'Erro ao deletar suplemento', details: err.message });
+    return respondWithError(res, err, 'Erro ao deletar suplemento');
   }
 };
 
