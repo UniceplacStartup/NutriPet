@@ -1,39 +1,58 @@
 const db = require('../config/database');
 const { isUndefined } = require('../utils/validateInput');
 const NutritionalCalculator = require('../services/NutritionalCalculator');
+const { saveFormCalculation } = require('../services/calculationService');
 const PDFDocument = require('pdfkit');
 
+// Texto vazio vira null (usa a condição padrão da espécie)
+const normalizarCondicao = (condicao) => (typeof condicao === 'string' ? condicao.trim() || null : condicao ?? null);
+
+// Valida peso, condição e detalhes rodando o cálculo sem alimentos.
+// Retorna a mensagem de erro, ou null se os dados forem válidos.
+const validarDadosNutricionais = (paciente, { peso_atual, condicao, detalhes }) => {
+  if (condicao !== null && typeof condicao !== 'string') {
+    return 'condicao deve ser texto';
+  }
+  if (detalhes !== null && (typeof detalhes !== 'object' || Array.isArray(detalhes))) {
+    return 'detalhes deve ser um objeto';
+  }
+  try {
+    NutritionalCalculator.calcular(paciente, { peso_atual, condicao, detalhes }, []);
+    return null;
+  } catch (err) {
+    return err.message.trim();
+  }
+};
 
 const createDietaryForm = async (req, res) => {
   try {
-    const { paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet } = req.body;
+    const { paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes } = req.body;
     if (isUndefined(paciente_id) || isUndefined(peso_atual)) {
       return res.status(400).json({ error: 'paciente_id e peso_atual são obrigatórios' });
     }
-    
+
     // Verificar se o paciente pertence à clínica do usuário e buscar dados completos
     const { rows: pacienteRows } = await db.query('SELECT * FROM pacientes WHERE id = $1 AND clinica_id = $2', [Number(paciente_id), req.user.clinicaId]);
     if (!pacienteRows.length) return res.status(403).json({ error: 'Acesso negado: paciente não pertence à sua clínica' });
 
     const paciente = pacienteRows[0];
 
+    const dadosNutricionais = { peso_atual, condicao: normalizarCondicao(condicao), detalhes: detalhes ?? null };
+    const erroValidacao = validarDadosNutricionais(paciente, dadosNutricionais);
+    if (erroValidacao) return res.status(400).json({ error: erroValidacao });
+
     const { rows } = await db.query(
-      `INSERT INTO formularios_dieteticos (paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [Number(paciente_id), usuario_id ? Number(usuario_id) : null, peso_atual, condicoes_clinicas || null, observacoes_vet || null]
+      `INSERT INTO formularios_dieteticos (paciente_id, usuario_id, peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [Number(paciente_id), usuario_id ? Number(usuario_id) : null, peso_atual, condicoes_clinicas || null, observacoes_vet || null,
+      dadosNutricionais.condicao, dadosNutricionais.detalhes]
     );
-    
+
     const formulario = rows[0];
 
     try {
-      // Dispara o cálculo nutricional passando array vazio de alimentos (novo formulário)
-      const calculo = NutritionalCalculator.calcular(paciente, formulario, []);
-      
-      // Persiste os resultados na tabela de cálculos com conversão explícita de ID
-      await db.query(`
-        INSERT INTO calculos_formulario (formulario_id, em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia)
-        VALUES ($1, $2, $3, $4)
-      `, [Number(formulario.id), calculo.emTotal, calculo.nem, calculo.quantidadeRecomendada]);
+      // Novo formulário ainda sem alimentos: registra o NEM, a quantidade fica nula
+      await saveFormCalculation(formulario.id);
     } catch (errCalc) {
       // Falhas no cálculo não quebram o fluxo principal
       console.error('Erro no cálculo nutricional (create):', errCalc.message);
@@ -78,40 +97,38 @@ const getDietaryFormById = async (req, res) => {
 const updateDietaryForm = async (req, res) => {
   try {
     const { id } = req.formulario;
-    const { peso_atual, condicoes_clinicas, observacoes_vet } = req.body;
+    const { peso_atual, condicoes_clinicas, observacoes_vet, condicao, detalhes } = req.body;
+
+    // Campos ausentes mantêm o valor atual; condicao/detalhes aceitam null para voltar ao padrão
+    const dadosNutricionais = {
+      peso_atual: peso_atual ?? req.formulario.peso_atual,
+      condicao: condicao === undefined ? req.formulario.condicao : normalizarCondicao(condicao),
+      detalhes: detalhes === undefined ? req.formulario.detalhes : detalhes,
+    };
+
+    const { rows: pacRows } = await db.query('SELECT * FROM pacientes WHERE id = $1', [Number(req.formulario.paciente_id)]);
+    const erroValidacao = validarDadosNutricionais(pacRows[0], dadosNutricionais);
+    if (erroValidacao) return res.status(400).json({ error: erroValidacao });
+
     const { rows } = await db.query(
-      `UPDATE formularios_dieteticos SET 
-        peso_atual = COALESCE($1, peso_atual),
+      `UPDATE formularios_dieteticos SET
+        peso_atual = $1,
         condicoes_clinicas = COALESCE($2, condicoes_clinicas),
         observacoes_vet = COALESCE($3, observacoes_vet),
+        condicao = $4,
+        detalhes = $5,
         updated_at = NOW()
-       WHERE id=$4 RETURNING *`,
-      [peso_atual ?? null, condicoes_clinicas ?? null, observacoes_vet ?? null, Number(id)]
+       WHERE id=$6 RETURNING *`,
+      [dadosNutricionais.peso_atual, condicoes_clinicas ?? null, observacoes_vet ?? null,
+      dadosNutricionais.condicao, dadosNutricionais.detalhes, Number(id)]
     );
     if (!rows.length) return res.status(404).json();
-    
+
     const formularioAtualizado = rows[0];
 
     try {
-      // Busca dados completos do paciente
-      const { rows: pacRows } = await db.query('SELECT * FROM pacientes WHERE id = $1', [Number(formularioAtualizado.paciente_id)]);
-      const paciente = pacRows[0];
-
-      // Busca os alimentos associados ao formulário
-      const { rows: alimentos } = await db.query('SELECT * FROM alimentos_consumidos WHERE formulario_id = $1', [Number(id)]);
-
-      // Dispara o cálculo nutricional com os dados atualizados
-      const calculo = NutritionalCalculator.calcular(paciente, formularioAtualizado, alimentos);
-
-      // Upsert: atualiza se já existir ou insere um novo garantindo a relação 1:1
-      await db.query(`
-        INSERT INTO calculos_formulario (formulario_id, em_total_kcal_dia, nem_calculada_kcal_dia, quantidade_racao_recomendada_g_dia)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (formulario_id) DO UPDATE SET
-          em_total_kcal_dia = EXCLUDED.em_total_kcal_dia,
-          nem_calculada_kcal_dia = EXCLUDED.nem_calculada_kcal_dia,
-          quantidade_racao_recomendada_g_dia = EXCLUDED.quantidade_racao_recomendada_g_dia
-      `, [Number(id), calculo.emTotal, calculo.nem, calculo.quantidadeRecomendada]);
+      // Recalcula com os dados atualizados e os alimentos já cadastrados
+      await saveFormCalculation(id);
     } catch (errCalc) {
       // Falhas no cálculo não quebram o fluxo principal
       console.error('Erro no cálculo nutricional (update):', errCalc.message);
