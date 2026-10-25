@@ -1,5 +1,6 @@
 // API base configuration
-const API_BASE_URL = 'http://localhost:3000/api'
+// Em produção, defina VITE_API_URL no momento do build
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

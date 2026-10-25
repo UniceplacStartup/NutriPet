@@ -6,6 +6,11 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Atrás de proxy reverso, sem isso o rate limit enxerga todos com o IP do proxy
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY));
+}
 const allowedOrigins = process.env.CORS_ORIGIN 
   ? process.env.CORS_ORIGIN.split(',')
   : ['http://localhost:5173'];
