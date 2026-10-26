@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const db = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,6 +81,10 @@ app.use((req, res) => {
 // Middleware global de erro sempre por ultimo
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+db.ensureSchema()
+  .catch((err) => console.error('Erro ao atualizar schema:', err.message))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+    });
+  });

@@ -5,7 +5,7 @@ function buildConfig() {
   // Prefer a full connection string if provided
   if (process.env.DATABASE_URL) {
     const cfg = { connectionString: process.env.DATABASE_URL };
-    if (process.env.DATABASE_SSL === 'true') {
+    if (process.env.DATABASE_SSL === 'true' || !process.env.DATABASE_URL.includes('localhost')) {
       cfg.ssl = { rejectUnauthorized: false };
     }
     return cfg;
@@ -30,7 +30,18 @@ function buildConfig() {
 
 const pool = new Pool(buildConfig());
 
+// Garante que as colunas novas das últimas migrations existam em produção
+async function ensureSchema() {
+  await pool.query(`
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS matricula VARCHAR(7);
+    CREATE UNIQUE INDEX IF NOT EXISTS usuarios_matricula_key ON usuarios (matricula);
+    ALTER TABLE formularios_dieteticos ADD COLUMN IF NOT EXISTS condicao VARCHAR(30);
+    ALTER TABLE formularios_dieteticos ADD COLUMN IF NOT EXISTS detalhes JSONB;
+  `);
+}
+
 module.exports = {
   query: (text, params) => pool.query(text, params),
   pool,
+  ensureSchema,
 };
