@@ -4,6 +4,12 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
+// Sem a chave, login e cadastro falham com 500 (e o cadastro criaria a conta antes de falhar)
+if (!process.env.SECRETKEY) {
+  console.error('SECRETKEY não definida: configure a variável de ambiente antes de iniciar a API.');
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -26,7 +32,11 @@ app.use(
         return callback(null, true);
       }
 
-      return callback (new Error('Origem não permitida'));
+      // Loga a origem recusada: o erro mais comum é localhost x 127.0.0.1 ou porta diferente
+      console.warn(`CORS: origem não permitida: ${origin} (permitidas: ${allowedOrigins.join(', ')})`);
+      const err = new Error('Origem não permitida');
+      err.status = 403;
+      return callback(err);
     }
   })
 );

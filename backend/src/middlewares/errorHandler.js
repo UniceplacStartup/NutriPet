@@ -6,6 +6,11 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ error: 'JSON inválido no corpo da requisição' });
   }
 
+  // Origem recusada pelo CORS (src/index.js)
+  if (err.status === 403 && err.message === 'Origem não permitida') {
+    return res.status(403).json({ error: 'Origem não permitida' });
+  }
+
   // Erro de validacao
   if (err.name === 'SequelizeValidationError') {
     const messages = err.errors.map(e => e.message);
@@ -18,9 +23,10 @@ const errorHandler = (err, req, res, next) => {
     return res.status(409).json({ error: 'Conflito de dados', messages });
   }
 
-  // Erros conhecidos do PostgreSQL (unique, FK, tipo inválido...)
+  // Erros conhecidos do PostgreSQL (unique, FK, tipo inválido, banco sem migration...)
   const dbError = mapDbError(err);
   if (dbError) {
+    if (dbError.status >= 500) console.error(dbError.error, err);
     return res.status(dbError.status).json({ error: dbError.error });
   }
 

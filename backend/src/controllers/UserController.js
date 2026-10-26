@@ -58,9 +58,12 @@ const signup = async (req, res) => {
         user.matricula = matricula.trim();
         await user.save(client);
 
+        // Gera o token antes do COMMIT: se falhar, a conta não fica criada pela metade
+        const token = createToken(user);
+
         await client.query('COMMIT');
 
-        res.status(201).json({ token: createToken(user), user, clinica: clinic });
+        res.status(201).json({ token, user, clinica: clinic });
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         respondWithError(res, err, 'Erro ao criar conta');

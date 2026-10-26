@@ -50,7 +50,7 @@ As tecnologias escolhidas para este projeto visam produtividade, escalabilidade 
     cd backend
     cp .env.example .env
     ```
-    Ajuste as credenciais do banco e defina `SECRETKEY` (sem ela o login retorna erro 500). Veja a [tabela de variáveis](#variáveis-de-ambiente-do-backend).
+    Ajuste as credenciais do banco e defina `SECRETKEY` (sem ela a API não inicia). Veja a [tabela de variáveis](#variáveis-de-ambiente-do-backend).
 
 3.  **Instale as dependências:**
     ```bash
@@ -115,8 +115,8 @@ O sistema é composto por três partes independentes:
 | `DATABASE_URL` | ✅ * | String de conexão do Postgres. Se o provedor exigir SSL, acrescente `?sslmode=require` |
 | `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE` | ✅ * | Alternativa à `DATABASE_URL` (* use uma das duas formas) |
 | `DATABASE_SSL` | | `true` força SSL sem validar o certificado (para certificado autoassinado). Só funciona junto com `DATABASE_URL` e não afeta as migrations |
-| `SECRETKEY` | ✅ | Chave de assinatura dos tokens JWT. Use um valor longo e aleatório (ex: `openssl rand -hex 32`). Trocá-la invalida todas as sessões |
-| `CORS_ORIGIN` | ✅ em produção | URL(s) do frontend, separadas por vírgula **sem espaços** (ex: `https://app.exemplo.com.br`). Padrão: `http://localhost:5173` |
+| `SECRETKEY` | ✅ | Chave de assinatura dos tokens JWT. Use um valor longo e aleatório (ex: `openssl rand -hex 32`). Sem ela a API não inicia. Trocá-la invalida todas as sessões |
+| `CORS_ORIGIN` | ✅ em produção | URL(s) do frontend, separadas por vírgula **sem espaços** (ex: `https://app.exemplo.com.br`). Padrão: `http://localhost:5173`. `localhost` e `127.0.0.1` contam como origens diferentes; uma origem fora da lista recebe 403 e aparece no log da API |
 | `PORT` | | Porta HTTP da API. Padrão: `3000` (a maioria das plataformas define automaticamente) |
 | `TRUST_PROXY` | ✅ atrás de proxy | Número de proxies reversos à frente da API (normalmente `1`). Sem isso, o rate limit trata todos os usuários como um só IP e o limite de login (5 tentativas a cada 15 min) passa a valer para o sistema inteiro |
 | `NODE_ENV` | | `production` oculta o stack trace nas respostas de erro |
@@ -139,7 +139,7 @@ npm ci
 npx sequelize-cli db:migrate --url "$DATABASE_URL"
 ```
 
-Rode esse comando **a cada deploy** que trouxer migrations novas (pasta `backend/migrations/`). Para conferir o estado: `npx sequelize-cli db:migrate:status --url "$DATABASE_URL"`.
+Rode esse comando **a cada deploy** que trouxer migrations novas (pasta `backend/migrations/`). Se o banco ficar atrás do código, a API responde 500 com `Banco de dados desatualizado: rode as migrations`. Para conferir o estado: `npx sequelize-cli db:migrate:status --url "$DATABASE_URL"`.
 
 **2. Primeiro acesso: criar a clínica e o administrador**
 

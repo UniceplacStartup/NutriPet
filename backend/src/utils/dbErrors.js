@@ -7,6 +7,9 @@ const PG_ERRORS = {
     '22008': { status: 400, error: 'Data inválida' },               // datetime_field_overflow
     '22003': { status: 400, error: 'Número fora do intervalo' },    // numeric_value_out_of_range
     '22001': { status: 400, error: 'Texto maior que o permitido' }, // string_data_right_truncation
+    // Schema atrás do código: falta rodar migration (ex: coluna usuarios.matricula)
+    '42703': { status: 500, error: 'Banco de dados desatualizado: rode as migrations' }, // undefined_column
+    '42P01': { status: 500, error: 'Banco de dados desatualizado: rode as migrations' }, // undefined_table
 };
 
 // Mensagem amigável para as constraints únicas do schema
@@ -30,6 +33,7 @@ const mapDbError = (err) => {
 const respondWithError = (res, err, message) => {
     const mapped = mapDbError(err);
     if (mapped) {
+        if (mapped.status >= 500) { console.error(`${message}: ${mapped.error}:`, err.message) }
         return res.status(mapped.status).json({ error: mapped.error });
     }
     console.error(`${message}:`, err);
